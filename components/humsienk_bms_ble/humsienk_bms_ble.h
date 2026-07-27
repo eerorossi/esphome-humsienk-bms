@@ -156,9 +156,11 @@ class HumsienkBmsBle :
   bool enable_fet_control_{false};
   uint8_t no_response_count_{0};
   uint8_t poll_index_{0};
+  uint8_t init_index_{0};
 #ifdef USE_ESP32
   uint16_t write_handle_{0};
   uint16_t notify_handle_{0};
+  esp_gatt_write_type_t write_type_{ESP_GATT_WRITE_TYPE_NO_RSP};
 #endif
 
   // Frame handling
