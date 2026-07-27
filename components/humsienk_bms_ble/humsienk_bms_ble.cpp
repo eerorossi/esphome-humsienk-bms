@@ -1,8 +1,16 @@
 #include "humsienk_bms_ble.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/version.h"
+#include <cinttypes>
 #include <cmath>
 #include <cstdio>
+
+#if ESPHOME_VERSION_CODE >= VERSION_CODE(2025, 12, 0)
+#define ADDR_STR(x) x
+#else
+#define ADDR_STR(x) (x).c_str()
+#endif
 
 namespace esphome::humsienk_bms_ble {
 
@@ -59,7 +67,7 @@ void HumsienkBmsBle::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
       auto *write_chr = this->parent_->get_characteristic(HUMSIENK_SERVICE_UUID, HUMSIENK_WRITE_CHAR_UUID);
       if (notify_chr == nullptr || write_chr == nullptr) {
         ESP_LOGE(TAG, "[%s] Humsienk service (0x0001) not found, not a Humsienk BMS?",
-                 this->parent_->address_str().c_str());
+                 ADDR_STR(this->parent_->address_str()));
         break;
       }
       this->notify_handle_ = notify_chr->handle;
@@ -98,7 +106,7 @@ void HumsienkBmsBle::update() {
 
 #ifdef USE_ESP32
   if (this->node_state != espbt::ClientState::ESTABLISHED) {
-    ESP_LOGW(TAG, "[%s] Not connected", this->parent_->address_str().c_str());
+    ESP_LOGW(TAG, "[%s] Not connected", ADDR_STR(this->parent_->address_str()));
     return;
   }
   // Start a fresh poll cycle.
@@ -287,7 +295,7 @@ void HumsienkBmsBle::decode_string_(const std::vector<uint8_t> &frame, text_sens
 #ifdef USE_ESP32
 bool HumsienkBmsBle::send_frame_(const std::vector<uint8_t> &frame) {
   if (this->node_state != espbt::ClientState::ESTABLISHED || this->write_handle_ == 0) {
-    ESP_LOGW(TAG, "[%s] cannot write, not connected", this->parent_->address_str().c_str());
+    ESP_LOGW(TAG, "[%s] cannot write, not connected", ADDR_STR(this->parent_->address_str()));
     return false;
   }
   ESP_LOGD(TAG, "TX: %s", format_hex_pretty(frame.data(), frame.size()).c_str());
@@ -295,7 +303,7 @@ bool HumsienkBmsBle::send_frame_(const std::vector<uint8_t> &frame) {
                                          this->write_handle_, frame.size(), const_cast<uint8_t *>(frame.data()),
                                          ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
   if (status)
-    ESP_LOGW(TAG, "[%s] esp_ble_gattc_write_char failed, status=%d", this->parent_->address_str().c_str(), status);
+    ESP_LOGW(TAG, "[%s] esp_ble_gattc_write_char failed, status=%d", ADDR_STR(this->parent_->address_str()), status);
   return status == 0;
 }
 
@@ -383,7 +391,7 @@ void HumsienkBmsBle::publish_state_(text_sensor::TextSensor *s, const std::strin
 
 std::string HumsienkBmsBle::to_hex_string_(uint32_t value) {
   char buf[11];
-  snprintf(buf, sizeof(buf), "0x%08X", value);
+  snprintf(buf, sizeof(buf), "0x%08" PRIX32, value);
   return std::string(buf);
 }
 
