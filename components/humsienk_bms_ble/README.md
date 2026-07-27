@@ -25,6 +25,10 @@ Command format (verified): `AA CMD 01 DATA CRC_LO CRC_HI`, e.g. discharge off =
 ## BLE protocol summary
 
 - Service UUID `0x0001`, notify characteristic `0x0003`, write characteristic `0x0002`
+- The write characteristic advertises plain Write only (properties `0x08`), so
+  requests must be sent as Write Request; Write Without Response is silently
+  dropped by the BMS. The write type is taken from the discovered properties.
+- One request at a time: the next command is sent when the previous reply arrives
 - Advertised name starts with `HS`
 - Frame: `AA | CMD | LEN | DATA… | CRC_LO | CRC_HI`, CRC = 16-bit LE sum over `CMD…DATA`
 - Read commands polled each cycle: `0x20` (status), `0x21` (battery info), `0x22` (cells)

@@ -19,6 +19,22 @@ Captured directly from the Humsienk Android app toggling the switches:
 Frame = `AA CMD 01 DATA CRC_LO CRC_HI`, CRC = 16-bit LE sum of `{CMD, 0x01, DATA}`.
 The BMS acknowledges with a zero-payload echo frame, e.g. `aa 50 00 50 00`.
 
+## GATT characteristics as seen on a live BMC-04S001b
+
+Confirmed by the ESPHome component on 2026-07-27 (ESP32-S3, MTU 251):
+
+| Characteristic | Handle | Properties |
+|----------------|--------|------------|
+| Write (UUID `0x0002`) | `0x000C` | `0x08` — plain Write **only** |
+| Notify (UUID `0x0003`) | `0x000E` | `0x10` — Notify |
+
+The write characteristic does **not** advertise Write Without Response (`0x04`).
+Writing with `ESP_GATT_WRITE_TYPE_NO_RSP` is accepted by the local stack and then
+dropped silently by the BMS: requests appear on the wire, no notification ever
+comes back. The component therefore derives the write type from the discovered
+properties. The BMS also answers one command at a time, so both the handshake and
+the poll cycle send the next request only after the previous reply arrives.
+
 ## App polling loop (for reference)
 
 One-time on connect: `0x00` (init), `0xf5` (fw), `0x58` (config), `0x10`, a `0x5c`
