@@ -10,7 +10,8 @@ ESPHome component to monitor a **Humsienk** LiFePO4 battery BMS over Bluetooth L
 | Reading cell voltages (up to 24) | ✅ implemented |
 | Reading status (charge/discharge FET, balancing, alarms, cell disconnect) | ✅ implemented |
 | Device model / hardware version | ✅ implemented |
-| **Charge / discharge FET control (write)** | ✅ verified via BLE HCI snoop log |
+| **Charge FET control (write)** | ✅ verified on hardware — switch toggled, BMS reported the new state back |
+| Discharge FET control (write) | ✅ same command family, verified via BLE HCI snoop log |
 | Balancer / clear-errors control (write) | ⚠️ documented, not individually captured |
 
 The charge FET (`0x50`) and discharge FET (`0x51`) write commands were confirmed

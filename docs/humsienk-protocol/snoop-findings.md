@@ -19,6 +19,10 @@ Captured directly from the Humsienk Android app toggling the switches:
 Frame = `AA CMD 01 DATA CRC_LO CRC_HI`, CRC = 16-bit LE sum of `{CMD, 0x01, DATA}`.
 The BMS acknowledges with a zero-payload echo frame, e.g. `aa 50 00 50 00`.
 
+The charge FET command (`0x50`) was replayed successfully from the ESPHome
+component on 2026-07-27: toggling the switch changed the FET bit reported in the
+following `0x20` status frame, so the BMS acted on it rather than merely acking.
+
 ## GATT characteristics as seen on a live BMC-04S001b
 
 Confirmed by the ESPHome component on 2026-07-27 (ESP32-S3, MTU 251):
