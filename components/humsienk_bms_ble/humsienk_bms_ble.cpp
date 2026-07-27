@@ -27,6 +27,13 @@ static const uint8_t HUMSIENK_MIN_FRAME_LEN = 5;  // SOF + CMD + LEN + CRC_LO + 
 static const uint8_t POLL_CMDS[] = {HUMSIENK_CMD_STATUS, HUMSIENK_CMD_BATTERY_INFO, HUMSIENK_CMD_CELL_INFO};
 static const uint8_t POLL_CMD_COUNT = sizeof(POLL_CMDS) / sizeof(POLL_CMDS[0]);
 
+// Connection handshake: init -> model -> hardware version. The BMS answers one
+// command at a time, so these are chained on each reply like the poll cycle
+// instead of being written back to back, which risks the extra writes being
+// dropped before the device has finished handling the first one.
+static const uint8_t INIT_CMDS[] = {HUMSIENK_CMD_INIT, HUMSIENK_CMD_DEVICE_MODEL, HUMSIENK_CMD_HW_VERSION};
+static const uint8_t INIT_CMD_COUNT = sizeof(INIT_CMDS) / sizeof(INIT_CMDS[0]);
+
 static const uint8_t MAX_NO_RESPONSE = 4;
 
 // Little-endian readers (frame is guaranteed long enough by the caller).
@@ -72,6 +79,13 @@ void HumsienkBmsBle::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
       }
       this->notify_handle_ = notify_chr->handle;
       this->write_handle_ = write_chr->handle;
+      // A characteristic that only advertises plain Write silently drops writes
+      // sent without a response, so follow what the peer actually supports.
+      this->write_type_ = (write_chr->properties & ESP_GATT_CHAR_PROP_BIT_WRITE_NR) ? ESP_GATT_WRITE_TYPE_NO_RSP
+                                                                                    : ESP_GATT_WRITE_TYPE_RSP;
+      ESP_LOGD(TAG, "Notify handle 0x%04X (properties 0x%02X), write handle 0x%04X (properties 0x%02X, using %s)",
+               this->notify_handle_, notify_chr->properties, this->write_handle_, write_chr->properties,
+               this->write_type_ == ESP_GATT_WRITE_TYPE_NO_RSP ? "write without response" : "write request");
 
       auto status = esp_ble_gattc_register_for_notify(this->parent()->get_gattc_if(), this->parent()->get_remote_bda(),
                                                       this->notify_handle_);
@@ -80,12 +94,14 @@ void HumsienkBmsBle::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
       break;
     }
     case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+      if (param->reg_for_notify.status != ESP_GATT_OK)
+        ESP_LOGE(TAG, "Notification registration failed, status=%d; no measurements will arrive",
+                 param->reg_for_notify.status);
       this->node_state = espbt::ClientState::ESTABLISHED;
       this->frame_buffer_.clear();
-      // Handshake and one-time device information.
-      this->write_command_(HUMSIENK_CMD_INIT);
-      this->write_command_(HUMSIENK_CMD_DEVICE_MODEL);
-      this->write_command_(HUMSIENK_CMD_HW_VERSION);
+      // Handshake and one-time device information, chained on each reply.
+      this->init_index_ = 0;
+      this->write_command_(INIT_CMDS[this->init_index_]);
       break;
     }
     case ESP_GATTC_NOTIFY_EVT: {
@@ -179,6 +195,13 @@ void HumsienkBmsBle::decode_(const std::vector<uint8_t> &frame) {
   }
 
 #ifdef USE_ESP32
+  // Advance the handshake chain only for the expected handshake reply.
+  if (this->init_index_ < INIT_CMD_COUNT && cmd == INIT_CMDS[this->init_index_]) {
+    this->init_index_++;
+    if (this->init_index_ < INIT_CMD_COUNT)
+      this->write_command_(INIT_CMDS[this->init_index_]);
+  }
+
   // Advance the poll chain only for the expected read reply.
   if (this->poll_index_ < POLL_CMD_COUNT && cmd == POLL_CMDS[this->poll_index_]) {
     this->poll_index_++;
@@ -301,7 +324,7 @@ bool HumsienkBmsBle::send_frame_(const std::vector<uint8_t> &frame) {
   ESP_LOGD(TAG, "TX: %s", format_hex_pretty(frame.data(), frame.size()).c_str());
   auto status = esp_ble_gattc_write_char(this->parent_->get_gattc_if(), this->parent_->get_conn_id(),
                                          this->write_handle_, frame.size(), const_cast<uint8_t *>(frame.data()),
-                                         ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
+                                         this->write_type_, ESP_GATT_AUTH_REQ_NONE);
   if (status)
     ESP_LOGW(TAG, "[%s] esp_ble_gattc_write_char failed, status=%d", ADDR_STR(this->parent_->address_str()), status);
   return status == 0;
