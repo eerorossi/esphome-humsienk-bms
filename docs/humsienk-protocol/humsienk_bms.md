@@ -77,7 +77,7 @@ Checksum: 16-bit LE sum of bytes from CMD through end of DATA.
 | 4 | Pack overvoltage protection |
 | 5 | Analogue front end error |
 | 6 | Charging stopped |
-| 7 | **Not the charge FET.** Set on an idle, fully charged pack; clear in both charge-FET states. Meaning unknown, "charge complete" fits the observation. See [snoop-findings.md](snoop-findings.md) |
+| 7 | **Not the charge FET** — charging stopped/complete. Clear right after either 0x50 command, goes to 1 once charging stays blocked and the pack settles at 0 A. See [snoop-findings.md](snoop-findings.md) |
 | 8 | Charge overcurrent warning |
 | 9 | Charge over-temperature warning |
 | 10 | Charge under-temperature warning |

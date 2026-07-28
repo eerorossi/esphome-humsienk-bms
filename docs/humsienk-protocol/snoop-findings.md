@@ -38,10 +38,14 @@ Driving `0x50` from the ESPHome component and reading `0x20` one round trip late
 | `aa 50 01 00` (off) | `0x00800000` | not charging |
 
 So the charge FET state is **bit 3** on this firmware and the command polarity is the
-documented one (`0x01` = on). The aiobmsble bit table's bit 7 is something else: it
-was set on an idle, fully charged pack at 0 A (`0x00800080`) and stayed clear in both
-states above, so "charge complete" fits it better than "charge FET". It is masked out
-of the problem bitmask for now instead of being decoded as an alarm.
+documented one (`0x01` = on). The aiobmsble bit table's bit 7 means "charging stopped
+or complete": it is clear for a moment after either command (both readings above were
+taken ~100 ms after the ack), but once charging stays disabled and a full pack settles
+at 0 A it goes to 1 (`0x00800080`, the value seen in the snoop). Reading it as the FET
+status therefore produced a stable but exactly inverted switch in Home Assistant — off
+while current was flowing, on while charging was blocked. It is masked out of the
+problem bitmask instead of being decoded as an alarm, since it appears on a healthy
+pack.
 
 This also means bit 3 is not "cell overvoltage protection" as documented, and the
 per-byte layout (MSB = state, low 7 bits = alarms) does not hold for byte 0. Whether
