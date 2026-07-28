@@ -254,10 +254,6 @@ void HumsienkBmsBle::decode_status_(const std::vector<uint8_t> &frame) {
     return;
   const uint32_t op = le32(frame, 7);
 
-  // Full frame while the FET status bits are still being reverse engineered: the
-  // parsed operation_status alone does not show which byte tracks the real state.
-  ESP_LOGD(TAG, "Status frame: %s", format_hex_pretty(frame.data(), frame.size()).c_str());
-
   // Either state value means the FET is on; see HUMSIENK_STATUS_CHARGE_FET.
   const bool charging = (op & HUMSIENK_STATUS_CHARGE_FET) != 0;
   const bool balancing = (op & (1UL << 15)) != 0;  // bit 15: balance active
