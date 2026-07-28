@@ -254,12 +254,22 @@ void HumsienkBmsBle::decode_status_(const std::vector<uint8_t> &frame) {
     return;
   const uint32_t op = le32(frame, 7);
 
-  const bool charging = (op & (1UL << 7)) != 0;    // bit 7:  charge FET on
-  const bool balancing = (op & (1UL << 15)) != 0;  // bit 15: balance active
-  const bool discharging = (op & (1UL << 23)) != 0;  // bit 23: discharge FET on
+  // Full frame while the FET status bits are still being reverse engineered: the
+  // parsed operation_status alone does not show which byte tracks the real state.
+  ESP_LOGD(TAG, "Status frame: %s", format_hex_pretty(frame.data(), frame.size()).c_str());
 
-  // The FET bits report the switch state, not whether current is flowing: a pack
-  // idling with both FETs enabled reads 0x00800080.
+  // Charge FET state is bit 3 on a live BMC-04S001b, not bit 7 as the aiobmsble bit
+  // table has it. Verified 2026-07-28 by driving the 0x50 command and reading the
+  // status one round trip later: data 0x01 -> 0x00000008, data 0x00 -> 0x00000000,
+  // with charge current flowing only in the former state. Bit 7 was set on an idle,
+  // fully charged pack, so it is something else (charge complete?), not the FET.
+  const bool charging = (op & HUMSIENK_STATUS_CHARGE_FET) != 0;
+  const bool balancing = (op & (1UL << 15)) != 0;  // bit 15: balance active
+  // Not yet verified against a toggle; the charge side turned out to be off by four
+  // bits, so this is the documented offset rather than a confirmed one.
+  const bool discharging = (op & HUMSIENK_STATUS_DISCHARGE_FET) != 0;
+
+  // The FET bit reports the switch state, not whether current is flowing.
   ESP_LOGD(TAG, "Operation status 0x%08" PRIX32 ": charge FET %s, discharge FET %s, balancing %s%s%s", op,
            charging ? "on" : "off", discharging ? "on" : "off", balancing ? "on" : "off",
            (op & (1UL << 6)) != 0 ? ", charging stopped" : "", (op & (1UL << 22)) != 0 ? ", discharging stopped" : "");
@@ -405,24 +415,24 @@ void HumsienkBmsBle::check_control_result_(uint32_t operation_status) {
     return;
   this->confirm_pending_ = false;
 
-  uint8_t bit;
+  uint32_t mask;
   const char *name;
   switch (this->confirm_control_) {
     case HUMSIENK_CONTROL_CHARGING:
-      bit = 7;
+      mask = HUMSIENK_STATUS_CHARGE_FET;
       name = "Charge FET";
       break;
     case HUMSIENK_CONTROL_DISCHARGING:
-      bit = 23;
+      mask = HUMSIENK_STATUS_DISCHARGE_FET;
       name = "Discharge FET";
       break;
     default:
-      bit = 15;
+      mask = 1UL << 15;
       name = "Balancer";
       break;
   }
 
-  const bool actual = (operation_status & (1UL << bit)) != 0;
+  const bool actual = (operation_status & mask) != 0;
   if (actual == this->confirm_state_) {
     ESP_LOGI(TAG, "%s is now %s", name, actual ? "on" : "off");
     return;

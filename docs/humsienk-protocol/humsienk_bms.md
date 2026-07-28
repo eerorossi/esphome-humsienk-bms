@@ -73,11 +73,11 @@ Checksum: 16-bit LE sum of bytes from CMD through end of DATA.
 | 0 | Charge overcurrent protection |
 | 1 | Charge over-temperature protection |
 | 2 | Charge under-temperature protection |
-| 3 | Cell overvoltage protection |
+| 3 | **Charge FET status (1 = on)** on a live BMC-04S001b, not cell overvoltage protection — verified by toggling `0x50` |
 | 4 | Pack overvoltage protection |
 | 5 | Analogue front end error |
 | 6 | Charging stopped |
-| 7 | Charge FET status (1 = on) |
+| 7 | **Not the charge FET.** Set on an idle, fully charged pack; clear in both charge-FET states. Meaning unknown, "charge complete" fits the observation. See [snoop-findings.md](snoop-findings.md) |
 | 8 | Charge overcurrent warning |
 | 9 | Charge over-temperature warning |
 | 10 | Charge under-temperature warning |
