@@ -123,3 +123,12 @@ switch:
       name: "${name} discharging switch"
     # balancer:
     #   name: "${name} balancer switch"
+
+  # Turns the BLE connection to the BMS on and off. Switching it off disconnects
+  # the client, so the BMS can be reached by another app (or the phone) in the
+  # meantime. Sensors stop updating and go unavailable while it is off.
+  - platform: ble_client
+    ble_client_id: client0
+    name: "${name} enable bluetooth connection"
+    id: ble_client_switch0
+    restore_mode: RESTORE_DEFAULT_ON
