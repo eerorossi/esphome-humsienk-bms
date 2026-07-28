@@ -27,30 +27,42 @@ The echo frame is only a receipt, not a confirmation: the BMS answers `aa 50 00 
 regardless of what it does with the FET. The component logs the raw `operation_status`
 at DEBUG and warns when the state that comes back disagrees with the command it sent.
 
-### Charge FET status is bit 3, not bit 7
+### FET state is a three-state field per byte, not a single bit
 
 Driving `0x50` from the ESPHome component and reading `0x20` one round trip later
-(2026-07-28, same BMC-04S001b, charge current available from solar):
+(2026-07-28, same BMC-04S001b):
 
-| Command sent | `operation_status` | Reality |
-|--------------|--------------------|---------|
-| `aa 50 01 01` (on) | `0x00800008` | charging, current positive |
-| `aa 50 01 00` (off) | `0x00800000` | not charging |
+| Command sent | `operation_status` | Conditions | Charge current |
+|--------------|--------------------|------------|----------------|
+| `aa 50 01 01` (on) | `0x00800008` | solar available | flowing, remaining capacity rose 0.5 Ah over the next hour |
+| `aa 50 01 00` (off) | `0x00800000` | solar available | 0 A |
+| `aa 50 01 01` (on) | `0x00800080` | full pack, after sunset | 0 A |
 
-So the charge FET state is **bit 3** on this firmware and the command polarity is the
-documented one (`0x01` = on). The aiobmsble bit table's bit 7 means "charging stopped
-or complete": it is clear for a moment after either command (both readings above were
-taken ~100 ms after the ack), but once charging stays disabled and a full pack settles
-at 0 A it goes to 1 (`0x00800080`, the value seen in the snoop). Reading it as the FET
-status therefore produced a stable but exactly inverted switch in Home Assistant — off
-while current was flowing, on while charging was blocked. It is masked out of the
-problem bitmask instead of being decoded as an alarm, since it appears on a healthy
-pack.
+So byte 0 of `operation_status` is the charge state and byte 2 the discharge state,
+and each holds one of three values rather than a single FET bit:
 
-This also means bit 3 is not "cell overvoltage protection" as documented, and the
-per-byte layout (MSB = state, low 7 bits = alarms) does not hold for byte 0. Whether
-the discharge FET is really bit 23 or the symmetric bit 19 is still untested — the
-component uses the documented bit 23 until someone toggles `0x51` and looks.
+| Value | Meaning |
+|-------|---------|
+| `0x00` | FET off |
+| `0x08` | FET on, current flowing |
+| `0x80` | FET on, idle (nothing to charge / no load, or charge complete) |
+
+The command polarity is the documented one (`0x01` = on). The aiobmsble bit table's
+"charge FET = bit 7" is only half of the picture: reading bit 7 alone reports off
+exactly while the pack is charging, and reading bit 3 alone reports off as soon as the
+pack is full. Both produce a stable but wrong switch state in Home Assistant, which is
+also what the Humsienk Android app shows — it appears to read bit 7 only.
+
+Consequences for the bit table: the documented bits 3 (cell overvoltage protection)
+and 19 (cell undervoltage protection) fall inside these state fields and cannot be
+alarms on this firmware, so they are masked out of the problem bitmask. The frame
+itself is otherwise as documented — `AA 20 0F 00 00 00 00 80 00 80 00 00 00 00 00 00
+00 00 2F 01` decodes as 15 data bytes, zero uptime, `operation_status = 0x00800080`,
+no cells balancing, no cells disconnected.
+
+The discharge side has only been observed in the idle state (`0x80`) so far, since the
+pack was not discharging while connected. If the symmetry holds, a load should turn
+byte 2 into `0x08` without the discharge switch changing state.
 
 ## GATT characteristics as seen on a live BMC-04S001b
 

@@ -35,16 +35,26 @@ static const uint8_t HUMSIENK_CMD_DISCHARGE_FET = 0x51;  // data [0x00]=off, [0x
 static const uint8_t HUMSIENK_CMD_BALANCE = 0x52;        // data [0x00]=off, [0x01]=on (documented)
 static const uint8_t HUMSIENK_CMD_CLEAR_ERRORS = 0x53;   // clear protection status (documented)
 
-// FET status bits in operation_status. The charge FET sits at bit 3 on a live
-// BMC-04S001b (verified by toggling 0x50), the discharge FET is still the
-// documented bit 23.
-static const uint32_t HUMSIENK_STATUS_CHARGE_FET = 1UL << 3;
-static const uint32_t HUMSIENK_STATUS_DISCHARGE_FET = 1UL << 23;
+// FET state in operation_status: byte 0 carries the charge side, byte 2 the discharge
+// side, and each is a three-state field rather than the single FET bit the aiobmsble
+// table describes:
+//
+//   0x00  FET off        0x08  FET on, current flowing        0x80  FET on, idle
+//
+// Verified 2026-07-28 on a live BMC-04S001b by driving 0x50 (see docs/humsienk-protocol):
+// data 0x01 with solar available gave 0x00800008 and the remaining capacity rose
+// 0.5 Ah, data 0x00 gave 0x00800000 at 0 A, and data 0x01 on a full pack after sunset
+// gave 0x00800080 at 0 A. Reading only bit 7 (the documented FET bit) reported off
+// exactly while the pack was charging; reading only bit 3 reports off once it is full.
+static const uint32_t HUMSIENK_STATUS_CHARGE_FET = 0x00000088;
+static const uint32_t HUMSIENK_STATUS_DISCHARGE_FET = 0x00880000;
+static const uint32_t HUMSIENK_STATUS_CHARGE_ACTIVE = 0x00000008;
+static const uint32_t HUMSIENK_STATUS_DISCHARGE_ACTIVE = 0x00080000;
 
-// Alarm bitmask with the state bits masked out: charge FET (3), balance (15),
-// discharge FET (23) and bit 7, whose meaning is unknown but which is set on an
-// idle full pack and would otherwise raise a bogus problem.
-static const uint32_t HUMSIENK_ALARM_MASK = 0xFF7F7F77;
+// Alarm bitmask with the state fields masked out: charge (0x88), balance (bit 15) and
+// discharge (0x88 in byte 2). The table's "cell over/undervoltage protection" bits 3
+// and 19 fall inside those fields, so they cannot be decoded as alarms here.
+static const uint32_t HUMSIENK_ALARM_MASK = 0xFF777F77;
 
 class HumsienkBmsBle;
 

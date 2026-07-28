@@ -258,22 +258,17 @@ void HumsienkBmsBle::decode_status_(const std::vector<uint8_t> &frame) {
   // parsed operation_status alone does not show which byte tracks the real state.
   ESP_LOGD(TAG, "Status frame: %s", format_hex_pretty(frame.data(), frame.size()).c_str());
 
-  // Charge FET state is bit 3 on a live BMC-04S001b, not bit 7 as the aiobmsble bit
-  // table has it. Verified 2026-07-28 by driving the 0x50 command and reading the
-  // status one round trip later: data 0x01 -> 0x00000008, data 0x00 -> 0x00000000,
-  // with charge current flowing only in the former state. Bit 7 means "charging
-  // stopped/complete": reading it as the FET made the switch stable but inverted, off
-  // while current was flowing and on once charging stayed blocked and the pack idled.
+  // Either state value means the FET is on; see HUMSIENK_STATUS_CHARGE_FET.
   const bool charging = (op & HUMSIENK_STATUS_CHARGE_FET) != 0;
   const bool balancing = (op & (1UL << 15)) != 0;  // bit 15: balance active
-  // Not yet verified against a toggle; the charge side turned out to be off by four
-  // bits, so this is the documented offset rather than a confirmed one.
+  // Same layout as the charge side, but only observed in the idle state so far: the
+  // pack has not been discharged while connected.
   const bool discharging = (op & HUMSIENK_STATUS_DISCHARGE_FET) != 0;
 
-  // The FET bit reports the switch state, not whether current is flowing.
-  ESP_LOGD(TAG, "Operation status 0x%08" PRIX32 ": charge FET %s, discharge FET %s, balancing %s%s%s", op,
-           charging ? "on" : "off", discharging ? "on" : "off", balancing ? "on" : "off",
-           (op & (1UL << 6)) != 0 ? ", charging stopped" : "", (op & (1UL << 22)) != 0 ? ", discharging stopped" : "");
+  ESP_LOGD(TAG, "Operation status 0x%08" PRIX32 ": charge FET %s%s, discharge FET %s%s, balancing %s", op,
+           charging ? "on" : "off", (op & HUMSIENK_STATUS_CHARGE_ACTIVE) != 0 ? " (current flowing)" : "",
+           discharging ? "on" : "off", (op & HUMSIENK_STATUS_DISCHARGE_ACTIVE) != 0 ? " (current flowing)" : "",
+           balancing ? "on" : "off");
 
   this->check_control_result_(op);
 
@@ -440,8 +435,8 @@ void HumsienkBmsBle::check_control_result_(uint32_t operation_status) {
   }
   ESP_LOGW(TAG,
            "%s is still %s after the %s command (operation_status 0x%08" PRIX32
-           "). The BMS accepted the command but refused to switch, most likely because a protection or "
-           "charge-full condition is active.",
+           "). The BMS acknowledged the command but the status disagrees: either a protection condition "
+           "holds the FET, or this firmware reports the state differently than decoded here.",
            name, actual ? "on" : "off", this->confirm_state_ ? "on" : "off", operation_status);
 }
 
