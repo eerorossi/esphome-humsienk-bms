@@ -261,8 +261,9 @@ void HumsienkBmsBle::decode_status_(const std::vector<uint8_t> &frame) {
   // Charge FET state is bit 3 on a live BMC-04S001b, not bit 7 as the aiobmsble bit
   // table has it. Verified 2026-07-28 by driving the 0x50 command and reading the
   // status one round trip later: data 0x01 -> 0x00000008, data 0x00 -> 0x00000000,
-  // with charge current flowing only in the former state. Bit 7 was set on an idle,
-  // fully charged pack, so it is something else (charge complete?), not the FET.
+  // with charge current flowing only in the former state. Bit 7 means "charging
+  // stopped/complete": reading it as the FET made the switch stable but inverted, off
+  // while current was flowing and on once charging stayed blocked and the pack idled.
   const bool charging = (op & HUMSIENK_STATUS_CHARGE_FET) != 0;
   const bool balancing = (op & (1UL << 15)) != 0;  // bit 15: balance active
   // Not yet verified against a toggle; the charge side turned out to be off by four
