@@ -36,6 +36,10 @@ static const uint8_t INIT_CMD_COUNT = sizeof(INIT_CMDS) / sizeof(INIT_CMDS[0]);
 
 static const uint8_t MAX_NO_RESPONSE = 4;
 
+// How long a request is assumed to be in flight. The BMS handles one command at
+// a time, so anything written while a reply is outstanding risks being dropped.
+static const uint32_t REPLY_TIMEOUT_MS = 1000;
+
 // Little-endian readers (frame is guaranteed long enough by the caller).
 static uint16_t le16(const std::vector<uint8_t> &d, size_t i) { return d[i] | (uint16_t(d[i + 1]) << 8); }
 static uint32_t le32(const std::vector<uint8_t> &d, size_t i) {
@@ -65,6 +69,9 @@ void HumsienkBmsBle::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
       }
       this->notify_handle_ = 0;
       this->write_handle_ = 0;
+      this->request_pending_ = false;
+      this->confirm_pending_ = false;
+      this->has_pending_control_ = false;
       this->frame_buffer_.clear();
       this->publish_device_unavailable_();
       break;
@@ -99,6 +106,7 @@ void HumsienkBmsBle::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
                  param->reg_for_notify.status);
       this->node_state = espbt::ClientState::ESTABLISHED;
       this->frame_buffer_.clear();
+      this->request_pending_ = false;
       // Handshake and one-time device information, chained on each reply.
       this->init_index_ = 0;
       this->write_command_(INIT_CMDS[this->init_index_]);
@@ -125,6 +133,11 @@ void HumsienkBmsBle::update() {
     ESP_LOGW(TAG, "[%s] Not connected", ADDR_STR(this->parent_->address_str()));
     return;
   }
+  // A control command that was queued while the bus was busy gets priority. This
+  // also covers the case where the reply it was waiting for never arrived.
+  if (this->flush_pending_control_())
+    return;
+
   // Start a fresh poll cycle.
   this->poll_index_ = 0;
   this->write_command_(POLL_CMDS[this->poll_index_]);
@@ -168,8 +181,10 @@ void HumsienkBmsBle::assemble(const uint8_t *data, uint16_t length) {
 
 void HumsienkBmsBle::decode_(const std::vector<uint8_t> &frame) {
   this->no_response_count_ = 0;
+  this->request_pending_ = false;
   this->publish_state_(this->online_status_binary_sensor_, true);
 
+  bool control_ack = false;
   const uint8_t cmd = frame[1];
   switch (cmd) {
     case HUMSIENK_CMD_STATUS:
@@ -189,12 +204,34 @@ void HumsienkBmsBle::decode_(const std::vector<uint8_t> &frame) {
       break;
     case HUMSIENK_CMD_INIT:
       break;  // handshake ack, nothing to decode
+    case HUMSIENK_CMD_CHARGE_FET:
+    case HUMSIENK_CMD_DISCHARGE_FET:
+    case HUMSIENK_CMD_BALANCE:
+    case HUMSIENK_CMD_CLEAR_ERRORS:
+      // Zero-payload echo of the command, e.g. AA 50 00 50 00. This only means the
+      // BMS received it; whether it actually switched the FET shows up in 0x20.
+      ESP_LOGI(TAG, "Control command 0x%02X acknowledged by the BMS", cmd);
+      control_ack = true;
+      break;
     default:
       ESP_LOGD(TAG, "Unhandled frame type 0x%02X", cmd);
       break;
   }
 
 #ifdef USE_ESP32
+  // Queued control commands go out before any read, so a switch press is never
+  // delayed by a full poll cycle.
+  if (this->flush_pending_control_())
+    return;
+
+  if (control_ack) {
+    // Re-read the status immediately so the switch shows the real FET state
+    // instead of the optimistic one for up to a whole update interval.
+    this->poll_index_ = 0;
+    this->write_command_(POLL_CMDS[this->poll_index_]);
+    return;
+  }
+
   // Advance the handshake chain only for the expected handshake reply.
   if (this->init_index_ < INIT_CMD_COUNT && cmd == INIT_CMDS[this->init_index_]) {
     this->init_index_++;
@@ -220,6 +257,14 @@ void HumsienkBmsBle::decode_status_(const std::vector<uint8_t> &frame) {
   const bool charging = (op & (1UL << 7)) != 0;    // bit 7:  charge FET on
   const bool balancing = (op & (1UL << 15)) != 0;  // bit 15: balance active
   const bool discharging = (op & (1UL << 23)) != 0;  // bit 23: discharge FET on
+
+  // The FET bits report the switch state, not whether current is flowing: a pack
+  // idling with both FETs enabled reads 0x00800080.
+  ESP_LOGD(TAG, "Operation status 0x%08" PRIX32 ": charge FET %s, discharge FET %s, balancing %s%s%s", op,
+           charging ? "on" : "off", discharging ? "on" : "off", balancing ? "on" : "off",
+           (op & (1UL << 6)) != 0 ? ", charging stopped" : "", (op & (1UL << 22)) != 0 ? ", discharging stopped" : "");
+
+  this->check_control_result_(op);
 
   this->publish_state_(this->charging_binary_sensor_, charging);
   this->publish_state_(this->discharging_binary_sensor_, discharging);
@@ -325,9 +370,13 @@ bool HumsienkBmsBle::send_frame_(const std::vector<uint8_t> &frame) {
   auto status = esp_ble_gattc_write_char(this->parent_->get_gattc_if(), this->parent_->get_conn_id(),
                                          this->write_handle_, frame.size(), const_cast<uint8_t *>(frame.data()),
                                          this->write_type_, ESP_GATT_AUTH_REQ_NONE);
-  if (status)
+  if (status) {
     ESP_LOGW(TAG, "[%s] esp_ble_gattc_write_char failed, status=%d", ADDR_STR(this->parent_->address_str()), status);
-  return status == 0;
+    return false;
+  }
+  this->request_pending_ = true;
+  this->last_request_ms_ = millis();
+  return true;
 }
 
 bool HumsienkBmsBle::write_command_(uint8_t command) {
@@ -348,6 +397,42 @@ bool HumsienkBmsBle::write_command_(uint8_t command, uint8_t data) {
   return this->send_frame_(frame);
 }
 #endif
+
+// Compare the reported status against the last command so a BMS that acks but
+// refuses to switch (protection active, pack full, ...) is visible in the log.
+void HumsienkBmsBle::check_control_result_(uint32_t operation_status) {
+  if (!this->confirm_pending_)
+    return;
+  this->confirm_pending_ = false;
+
+  uint8_t bit;
+  const char *name;
+  switch (this->confirm_control_) {
+    case HUMSIENK_CONTROL_CHARGING:
+      bit = 7;
+      name = "Charge FET";
+      break;
+    case HUMSIENK_CONTROL_DISCHARGING:
+      bit = 23;
+      name = "Discharge FET";
+      break;
+    default:
+      bit = 15;
+      name = "Balancer";
+      break;
+  }
+
+  const bool actual = (operation_status & (1UL << bit)) != 0;
+  if (actual == this->confirm_state_) {
+    ESP_LOGI(TAG, "%s is now %s", name, actual ? "on" : "off");
+    return;
+  }
+  ESP_LOGW(TAG,
+           "%s is still %s after the %s command (operation_status 0x%08" PRIX32
+           "). The BMS accepted the command but refused to switch, most likely because a protection or "
+           "charge-full condition is active.",
+           name, actual ? "on" : "off", this->confirm_state_ ? "on" : "off", operation_status);
+}
 
 bool HumsienkBmsBle::write_control(HumsienkControl control, bool state) {
   if (!this->enable_fet_control_) {
@@ -372,11 +457,42 @@ bool HumsienkBmsBle::write_control(HumsienkControl control, bool state) {
     default:
       return false;
   }
-  return this->write_command_(cmd, state ? 0x01 : 0x00);
+
+  // A write sent while a read is still outstanding is silently dropped by the BMS,
+  // so hold it back until the pending reply arrives.
+  if (this->request_in_flight_()) {
+    ESP_LOGD(TAG, "Request in flight, queuing control command 0x%02X", cmd);
+    this->pending_control_cmd_ = cmd;
+    this->pending_control_data_ = state ? 0x01 : 0x00;
+    this->has_pending_control_ = true;
+  } else if (!this->write_command_(cmd, state ? 0x01 : 0x00)) {
+    return false;
+  }
+
+  // Verify against the next status frame instead of trusting the ack.
+  this->confirm_control_ = control;
+  this->confirm_state_ = state;
+  this->confirm_pending_ = true;
+  return true;
 #else
   return false;
 #endif
 }
+
+#ifdef USE_ESP32
+bool HumsienkBmsBle::request_in_flight_() {
+  return this->request_pending_ && (millis() - this->last_request_ms_) < REPLY_TIMEOUT_MS;
+}
+
+bool HumsienkBmsBle::flush_pending_control_() {
+  if (!this->has_pending_control_)
+    return false;
+  this->has_pending_control_ = false;
+  ESP_LOGD(TAG, "Sending queued control command 0x%02X", this->pending_control_cmd_);
+  this->write_command_(this->pending_control_cmd_, this->pending_control_data_);
+  return true;
+}
+#endif
 
 // ---- helpers ---------------------------------------------------------------
 
