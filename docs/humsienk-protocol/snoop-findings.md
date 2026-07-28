@@ -24,13 +24,29 @@ component on 2026-07-27: toggling the switch changed the FET bit reported in the
 following `0x20` status frame, so the BMS acted on it rather than merely acking.
 
 The echo frame is only a receipt, not a confirmation: the BMS answers `aa 50 00 50 00`
-even when it keeps the FET off. Bit 7 / bit 23 of `operation_status` are the
-authoritative state and they report the FET switch, not current flow — an idle pack
-with both FETs enabled reads `0x00800080` at 0 A. So a switch that flips back to off
-in Home Assistant after the optimistic update means the BMS refused the command
-(protection active, charge-full, or the write was dropped), not that no current is
-flowing. The component logs the raw `operation_status` at DEBUG and warns when the
-state that comes back disagrees with the command it just sent.
+regardless of what it does with the FET. The component logs the raw `operation_status`
+at DEBUG and warns when the state that comes back disagrees with the command it sent.
+
+### Charge FET status is bit 3, not bit 7
+
+Driving `0x50` from the ESPHome component and reading `0x20` one round trip later
+(2026-07-28, same BMC-04S001b, charge current available from solar):
+
+| Command sent | `operation_status` | Reality |
+|--------------|--------------------|---------|
+| `aa 50 01 01` (on) | `0x00800008` | charging, current positive |
+| `aa 50 01 00` (off) | `0x00800000` | not charging |
+
+So the charge FET state is **bit 3** on this firmware and the command polarity is the
+documented one (`0x01` = on). The aiobmsble bit table's bit 7 is something else: it
+was set on an idle, fully charged pack at 0 A (`0x00800080`) and stayed clear in both
+states above, so "charge complete" fits it better than "charge FET". It is masked out
+of the problem bitmask for now instead of being decoded as an alarm.
+
+This also means bit 3 is not "cell overvoltage protection" as documented, and the
+per-byte layout (MSB = state, low 7 bits = alarms) does not hold for byte 0. Whether
+the discharge FET is really bit 23 or the symmetric bit 19 is still untested — the
+component uses the documented bit 23 until someone toggles `0x51` and looks.
 
 ## GATT characteristics as seen on a live BMC-04S001b
 

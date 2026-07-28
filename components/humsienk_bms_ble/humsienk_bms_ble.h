@@ -35,8 +35,16 @@ static const uint8_t HUMSIENK_CMD_DISCHARGE_FET = 0x51;  // data [0x00]=off, [0x
 static const uint8_t HUMSIENK_CMD_BALANCE = 0x52;        // data [0x00]=off, [0x01]=on (documented)
 static const uint8_t HUMSIENK_CMD_CLEAR_ERRORS = 0x53;   // clear protection status (documented)
 
-// Alarm bitmask with FET (7, 23) and balance (15) status bits masked out.
-static const uint32_t HUMSIENK_ALARM_MASK = 0xFF7F7F7F;
+// FET status bits in operation_status. The charge FET sits at bit 3 on a live
+// BMC-04S001b (verified by toggling 0x50), the discharge FET is still the
+// documented bit 23.
+static const uint32_t HUMSIENK_STATUS_CHARGE_FET = 1UL << 3;
+static const uint32_t HUMSIENK_STATUS_DISCHARGE_FET = 1UL << 23;
+
+// Alarm bitmask with the state bits masked out: charge FET (3), balance (15),
+// discharge FET (23) and bit 7, whose meaning is unknown but which is set on an
+// idle full pack and would otherwise raise a bogus problem.
+static const uint32_t HUMSIENK_ALARM_MASK = 0xFF7F7F77;
 
 class HumsienkBmsBle;
 
