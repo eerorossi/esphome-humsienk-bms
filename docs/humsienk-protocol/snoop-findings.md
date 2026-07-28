@@ -23,6 +23,15 @@ The charge FET command (`0x50`) was replayed successfully from the ESPHome
 component on 2026-07-27: toggling the switch changed the FET bit reported in the
 following `0x20` status frame, so the BMS acted on it rather than merely acking.
 
+The echo frame is only a receipt, not a confirmation: the BMS answers `aa 50 00 50 00`
+even when it keeps the FET off. Bit 7 / bit 23 of `operation_status` are the
+authoritative state and they report the FET switch, not current flow — an idle pack
+with both FETs enabled reads `0x00800080` at 0 A. So a switch that flips back to off
+in Home Assistant after the optimistic update means the BMS refused the command
+(protection active, charge-full, or the write was dropped), not that no current is
+flowing. The component logs the raw `operation_status` at DEBUG and warns when the
+state that comes back disagrees with the command it just sent.
+
 ## GATT characteristics as seen on a live BMC-04S001b
 
 Confirmed by the ESPHome component on 2026-07-27 (ESP32-S3, MTU 251):

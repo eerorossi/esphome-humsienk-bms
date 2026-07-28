@@ -157,6 +157,18 @@ class HumsienkBmsBle :
   uint8_t no_response_count_{0};
   uint8_t poll_index_{0};
   uint8_t init_index_{0};
+
+  // Command serialisation: the BMS answers one command at a time.
+  bool request_pending_{false};
+  uint32_t last_request_ms_{0};
+  bool has_pending_control_{false};
+  uint8_t pending_control_cmd_{0};
+  uint8_t pending_control_data_{0};
+
+  // Verification of the last control command against the next 0x20 status frame.
+  bool confirm_pending_{false};
+  bool confirm_state_{false};
+  HumsienkControl confirm_control_{HUMSIENK_CONTROL_CHARGING};
 #ifdef USE_ESP32
   uint16_t write_handle_{0};
   uint16_t notify_handle_{0};
@@ -169,11 +181,14 @@ class HumsienkBmsBle :
   void decode_battery_info_(const std::vector<uint8_t> &frame);    // 0x21
   void decode_cell_info_(const std::vector<uint8_t> &frame);       // 0x22
   void decode_string_(const std::vector<uint8_t> &frame, text_sensor::TextSensor *target);
+  void check_control_result_(uint32_t operation_status);
 
 #ifdef USE_ESP32
   bool write_command_(uint8_t command);                    // zero-payload (read) command
   bool write_command_(uint8_t command, uint8_t data);      // one-byte-payload (write) command
   bool send_frame_(const std::vector<uint8_t> &frame);
+  bool request_in_flight_();
+  bool flush_pending_control_();
 #endif
 
   void publish_state_(binary_sensor::BinarySensor *s, bool state);
