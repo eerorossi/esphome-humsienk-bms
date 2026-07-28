@@ -68,16 +68,23 @@ Checksum: 16-bit LE sum of bytes from CMD through end of DATA.
 
 ### operation_status bit definitions
 
+> **The FET status bits below do not hold on a live BMC-04S001b.** Bits 3 and 7 together
+> form a three-state charge field (`0x00` off, `0x08` on and conducting, `0x80` on and
+> idle), and bits 19/23 the same for discharge. Reading bit 7 or bit 3 alone gives a
+> wrong FET state half of the time, and bits 3/19 are therefore not the cell
+> over/undervoltage protections listed here. Measurements in
+> [snoop-findings.md](snoop-findings.md).
+
 | Bit | Meaning |
 |-----|---------|
 | 0 | Charge overcurrent protection |
 | 1 | Charge over-temperature protection |
 | 2 | Charge under-temperature protection |
-| 3 | **Charge FET status (1 = on)** on a live BMC-04S001b, not cell overvoltage protection — verified by toggling `0x50` |
+| 3 | Charge state field, see the note above (documented as cell overvoltage protection) |
 | 4 | Pack overvoltage protection |
 | 5 | Analogue front end error |
 | 6 | Charging stopped |
-| 7 | **Not the charge FET** — charging stopped/complete. Clear right after either 0x50 command, goes to 1 once charging stays blocked and the pack settles at 0 A. See [snoop-findings.md](snoop-findings.md) |
+| 7 | Charge state field, see the note above (documented as charge FET status) |
 | 8 | Charge overcurrent warning |
 | 9 | Charge over-temperature warning |
 | 10 | Charge under-temperature warning |
@@ -89,11 +96,11 @@ Checksum: 16-bit LE sum of bytes from CMD through end of DATA.
 | 16 | Discharge overcurrent protection |
 | 17 | Discharge over-temperature protection |
 | 18 | Discharge under-temperature protection |
-| 19 | Cell undervoltage protection |
+| 19 | Discharge state field, see the note above (documented as cell undervoltage protection) |
 | 20 | Short circuit protection |
 | 21 | Pack undervoltage protection |
 | 22 | Discharging stopped |
-| 23 | Discharge FET status (1 = on) |
+| 23 | Discharge state field, see the note above (documented as discharge FET status) |
 | 24 | Discharge overcurrent warning |
 | 25 | Discharge over-temperature warning |
 | 26 | Discharge under-temperature warning |
